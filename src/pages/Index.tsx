@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Transaction } from "@/types/transaction";
 import { saveTransactions, loadTransactions, clearTransactions } from "@/utils/storage";
 import { BalanceCard } from "@/components/BalanceCard";
 import { FilterTabs } from "@/components/FilterTabs";
+import { MonthTabs } from "@/components/MonthTabs";
 import { TransactionList } from "@/components/TransactionList";
 import { TransactionModal } from "@/components/TransactionModal";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { format, parseISO, addMonths } from "date-fns";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +24,10 @@ import {
 const Index = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filter, setFilter] = useState<string>("all");
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    const now = new Date();
+    return format(now, "yyyy-MM");
+  });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showClearDialog, setShowClearDialog] = useState(false);
@@ -35,25 +41,83 @@ const Index = () => {
     saveTransactions(transactions);
   }, [transactions]);
 
+  // Obter meses únicos das transações
+  const availableMonths = useMemo(() => {
+    const monthsSet = new Set<string>();
+    
+    // Adicionar meses das transações normais
+    transactions.forEach((t) => {
+      if (!t.isRecurring) {
+        const month = t.date.substring(0, 7); // YYYY-MM
+        monthsSet.add(month);
+      }
+    });
+
+    // Adicionar mês atual se não houver nenhuma transação
+    if (monthsSet.size === 0) {
+      monthsSet.add(format(new Date(), "yyyy-MM"));
+    }
+
+    // Ordenar meses
+    return Array.from(monthsSet).sort();
+  }, [transactions]);
+
+  // Garantir que o mês selecionado existe
+  useEffect(() => {
+    if (!availableMonths.includes(selectedMonth) && availableMonths.length > 0) {
+      setSelectedMonth(availableMonths[availableMonths.length - 1]);
+    }
+  }, [availableMonths, selectedMonth]);
+
   const handleAddTransaction = (transactionData: Omit<Transaction, "id" | "createdAt">) => {
     if (editingTransaction) {
+      // Ao editar, apenas atualiza a transação específica
       setTransactions((prev) =>
         prev.map((t) =>
           t.id === editingTransaction.id
-            ? { ...transactionData, id: t.id, createdAt: t.createdAt }
+            ? { 
+                ...transactionData, 
+                id: t.id, 
+                createdAt: t.createdAt,
+                // Manter informações de parcela se existir
+                currentInstallment: t.currentInstallment,
+                parentId: t.parentId,
+              }
             : t
         )
       );
       toast.success("Transação atualizada com sucesso!");
       setEditingTransaction(null);
     } else {
-      const newTransaction: Transaction = {
-        ...transactionData,
-        id: crypto.randomUUID(),
-        createdAt: Date.now(),
-      };
-      setTransactions((prev) => [newTransaction, ...prev]);
-      toast.success("Transação adicionada com sucesso!");
+      // Nova transação
+      const installmentsNum = transactionData.installments || 1;
+      const newTransactions: Transaction[] = [];
+      const parentId = crypto.randomUUID();
+      const baseDate = parseISO(transactionData.date);
+
+      // Criar transações para cada parcela
+      for (let i = 0; i < installmentsNum; i++) {
+        const installmentDate = addMonths(baseDate, i);
+        const newTransaction: Transaction = {
+          ...transactionData,
+          id: i === 0 ? parentId : crypto.randomUUID(),
+          createdAt: Date.now() + i, // Garantir ordem
+          date: format(installmentDate, "yyyy-MM-dd"),
+          currentInstallment: installmentsNum > 1 ? i + 1 : undefined,
+          parentId: i > 0 ? parentId : undefined,
+        };
+        newTransactions.push(newTransaction);
+      }
+
+      setTransactions((prev) => [...newTransactions, ...prev]);
+      
+      if (installmentsNum > 1) {
+        toast.success(`${installmentsNum} parcelas criadas com sucesso!`);
+      } else if (transactionData.isRecurring) {
+        toast.success("Transação fixa criada com sucesso!");
+      } else {
+        toast.success("Transação adicionada com sucesso!");
+      }
     }
   };
 
@@ -63,6 +127,23 @@ const Index = () => {
   };
 
   const handleDeleteTransaction = (id: string) => {
+    const transaction = transactions.find((t) => t.id === id);
+    
+    // Se for uma transação com parcelas, perguntar se quer deletar todas
+    if (transaction?.parentId || (transaction?.installments && transaction.installments > 1)) {
+      const relatedId = transaction.parentId || transaction.id;
+      const relatedTransactions = transactions.filter(
+        (t) => t.id === relatedId || t.parentId === relatedId
+      );
+      
+      if (relatedTransactions.length > 1) {
+        // Confirmar com o usuário (por simplicidade, vamos deletar apenas a selecionada)
+        setTransactions((prev) => prev.filter((t) => t.id !== id));
+        toast.success("Parcela excluída com sucesso!");
+        return;
+      }
+    }
+    
     setTransactions((prev) => prev.filter((t) => t.id !== id));
     toast.success("Transação excluída com sucesso!");
   };
@@ -74,7 +155,20 @@ const Index = () => {
     toast.success("Todos os dados foram limpos!");
   };
 
-  const filteredTransactions = transactions.filter((t) => {
+  // Filtrar transações do mês selecionado
+  const monthTransactions = useMemo(() => {
+    return transactions.filter((t) => {
+      // Transações fixas aparecem em todos os meses
+      if (t.isRecurring) return true;
+      
+      // Transações normais apenas no seu mês
+      const transactionMonth = t.date.substring(0, 7);
+      return transactionMonth === selectedMonth;
+    });
+  }, [transactions, selectedMonth]);
+
+  // Aplicar filtro de tipo
+  const filteredTransactions = monthTransactions.filter((t) => {
     if (filter === "all") return true;
     return t.type === filter;
   });
@@ -83,11 +177,12 @@ const Index = () => {
     return new Date(b.date).getTime() - new Date(a.date).getTime();
   });
 
-  const totalIncome = transactions
+  // Calcular totais apenas do mês selecionado
+  const totalIncome = monthTransactions
     .filter((t) => t.type === "income")
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const totalExpense = transactions
+  const totalExpense = monthTransactions
     .filter((t) => t.type === "expense")
     .reduce((sum, t) => sum + t.amount, 0);
 
@@ -117,6 +212,14 @@ const Index = () => {
         </header>
 
         <BalanceCard balance={balance} income={totalIncome} expense={totalExpense} />
+
+        {availableMonths.length > 0 && (
+          <MonthTabs
+            months={availableMonths}
+            selectedMonth={selectedMonth}
+            onMonthChange={setSelectedMonth}
+          />
+        )}
 
         <div className="space-y-4 animate-fade-in" style={{ animationDelay: "100ms" }}>
           <FilterTabs value={filter} onChange={setFilter} />

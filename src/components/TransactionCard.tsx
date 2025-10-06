@@ -40,7 +40,19 @@ export const TransactionCard = ({ transaction, onEdit, onDelete }: TransactionCa
           </div>
           
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-foreground truncate">{transaction.description}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-semibold text-foreground truncate">{transaction.description}</p>
+              {transaction.installments && transaction.installments > 1 && (
+                <span className="text-xs bg-secondary px-2 py-0.5 rounded-full text-muted-foreground font-medium">
+                  {transaction.currentInstallment}/{transaction.installments}x
+                </span>
+              )}
+              {transaction.isRecurring && (
+                <span className="text-xs bg-primary/10 px-2 py-0.5 rounded-full text-primary font-medium">
+                  Fixa
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-muted-foreground">{category.label}</span>
               <span className="text-xs text-muted-foreground">•</span>

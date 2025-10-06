@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Repeat, CreditCard } from "lucide-react";
 
 interface TransactionModalProps {
   open: boolean;
@@ -21,6 +23,8 @@ export const TransactionModal = ({ open, onClose, onSave, transaction }: Transac
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState<TransactionCategory>("food");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [installments, setInstallments] = useState("1");
+  const [isRecurring, setIsRecurring] = useState(false);
 
   useEffect(() => {
     if (transaction) {
@@ -29,6 +33,8 @@ export const TransactionModal = ({ open, onClose, onSave, transaction }: Transac
       setAmount(transaction.amount.toString());
       setCategory(transaction.category);
       setDate(transaction.date);
+      setInstallments((transaction.installments || 1).toString());
+      setIsRecurring(transaction.isRecurring || false);
     } else {
       resetForm();
     }
@@ -40,6 +46,8 @@ export const TransactionModal = ({ open, onClose, onSave, transaction }: Transac
     setAmount("");
     setCategory("food");
     setDate(new Date().toISOString().split("T")[0]);
+    setInstallments("1");
+    setIsRecurring(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -49,12 +57,19 @@ export const TransactionModal = ({ open, onClose, onSave, transaction }: Transac
       return;
     }
 
+    const installmentsNum = parseInt(installments);
+    if (installmentsNum < 1 || installmentsNum > 120) {
+      return;
+    }
+
     onSave({
       description: description.trim(),
       amount: parseFloat(amount),
       category,
       type,
       date,
+      installments: installmentsNum,
+      isRecurring,
     });
 
     resetForm();
@@ -152,6 +167,60 @@ export const TransactionModal = ({ open, onClose, onSave, transaction }: Transac
               required
               className="h-12"
             />
+          </div>
+
+          <div className="space-y-4 border-t pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="installments" className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4" />
+                Parcelas
+              </Label>
+              <Select 
+                value={installments} 
+                onValueChange={setInstallments}
+                disabled={isRecurring}
+              >
+                <SelectTrigger className="h-12">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">À vista (1x)</SelectItem>
+                  {Array.from({ length: 23 }, (_, i) => i + 2).map((num) => (
+                    <SelectItem key={num} value={num.toString()}>
+                      {num}x parcelas
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {parseInt(installments) > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  Serão criadas {installments} transações nos próximos meses
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="recurring"
+                checked={isRecurring}
+                onCheckedChange={(checked) => {
+                  setIsRecurring(checked as boolean);
+                  if (checked) setInstallments("1");
+                }}
+              />
+              <Label
+                htmlFor="recurring"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-2 cursor-pointer"
+              >
+                <Repeat className="w-4 h-4" />
+                Transação fixa (aparece em todos os meses)
+              </Label>
+            </div>
+            {isRecurring && (
+              <p className="text-xs text-muted-foreground">
+                Esta transação aparecerá automaticamente em todos os meses
+              </p>
+            )}
           </div>
 
           <div className="flex gap-3 pt-4">
